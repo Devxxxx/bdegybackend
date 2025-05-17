@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const path = require('path');
 const { StatusCodes } = require('http-status-codes');
 require('dotenv').config();
 
@@ -50,11 +51,40 @@ app.get('/health', (req, res) => {
   res.status(StatusCodes.OK).json({ status: 'ok', timestamp: new Date() });
 });
 
+// Serve frontend static files in production
+if (process.env.NODE_ENV === 'production') {
+  // Adjust the path based on your project structure
+  const frontendBuildPath = path.join(__dirname, '../../frontend/out');
+  
+  // Serve static files
+  app.use(express.static(frontendBuildPath));
+  
+  // Serve the index.html for any non-API routes
+  app.get('*', (req, res) => {
+    if (req.url.startsWith('/api/')) {
+      return res.status(StatusCodes.NOT_FOUND).json({
+        error: {
+          message: 'API endpoint not found'
+        }
+      });
+    }
+    res.sendFile(path.join(frontendBuildPath, 'index.html'));
+  });
+  
+  console.log(`Serving frontend from ${frontendBuildPath}`);
+}
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   const statusCode = err.statusCode || StatusCodes.INTERNAL_SERVER_ERROR;
   const message = err.message || 'Internal Server Error';
+  
+  // Check if HTML is expected in the response
+  if (req.accepts('html') && !req.url.startsWith('/api/') && process.env.NODE_ENV === 'production') {
+    // For non-API errors in production when HTML is expected, redirect to frontend error page
+    return res.redirect('/error');
+  }
   
   res.status(statusCode).json({
     error: {
@@ -64,8 +94,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
+// 404 handler - Only apply this for API routes in production
 app.use((req, res) => {
+  // If in production and not an API route, let the frontend handle the routing
+  if (process.env.NODE_ENV === 'production' && !req.url.startsWith('/api/')) {
+    return res.status(StatusCodes.OK).sendFile(path.join(__dirname, '../../frontend/out', 'index.html'));
+  }
+  
   res.status(StatusCodes.NOT_FOUND).json({
     error: {
       message: 'Resource not found'
